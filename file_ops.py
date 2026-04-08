@@ -7,15 +7,32 @@ def load_ledger():
     if LEDGER_FILE.exists():
         try:
             with open(LEDGER_FILE, 'r') as f:
-                return set(json.load(f))
+                data = json.load(f)
+                
+                # Auto-migrate the old list format to the new dictionary format
+                if isinstance(data, list):
+                    print("Migrating old ledger format to new dictionary format...")
+                    new_ledger = {}
+                    for filename in data:
+                        ts_str = filename.replace("Backtrack ", "").replace(".mkv", "")
+                        new_ledger[filename] = ts_str
+                    
+                    # 🔥 SAVE IMMEDIATELY AFTER MIGRATION
+                    save_ledger(new_ledger)
+                    
+                    return new_ledger
+                    
+                return data
         except json.JSONDecodeError:
             print("Warning: JSON inventory file corrupted. Building a new one.")
-            return set()
-    return set()
+            return {}
+    return {}
 
 def save_ledger(ledger_data):
     with open(LEDGER_FILE, 'w') as f:
-        json.dump(sorted(list(ledger_data)), f, indent=4)
+        # Sort the dictionary by filename alphabetically before saving
+        sorted_ledger = dict(sorted(ledger_data.items()))
+        json.dump(sorted_ledger, f, indent=4)
 
 def copy_files(source_files, dest_dir):
     if not dest_dir.exists():
@@ -31,17 +48,21 @@ def copy_files(source_files, dest_dir):
     copied_count = 0
     skipped_count = 0
     
-    for source_path, _ in source_files:
+    # Unpack both the path AND the timestamp from scanner.py
+    for source_path, timestamp in source_files:
         filename = source_path.name
         dest_path = dest_dir / filename
+        
+        # Format the datetime object back into a readable string for the JSON
+        timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
         
         # We append a temporary extension for the transfer process
         temp_dest_path = dest_path.with_suffix('.mkv.part')
         
-        # Fast Check & Fallback Check
+        # Fast Check & Fallback Check (Checking keys in a dict is very fast)
         if filename in ledger or dest_path.exists():
             skipped_count += 1
-            ledger.add(filename) 
+            ledger[filename] = timestamp_str  # Store as Key-Value pair
             continue
             
         print(f"Copying: {filename}...")
@@ -52,8 +73,8 @@ def copy_files(source_files, dest_dir):
             # 2. If we reach this line, the copy was 100% successful. Rename to .mkv
             temp_dest_path.rename(dest_path)
             
-            # 3. Log the success
-            ledger.add(filename) 
+            # 3. Log the success with the timestamp
+            ledger[filename] = timestamp_str 
             copied_count += 1
             
         except OSError as e:
