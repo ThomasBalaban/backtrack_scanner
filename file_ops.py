@@ -86,13 +86,14 @@ def copy_files(source_files, dest_dir):
 def verify_directories(source_files, dest_dir):
     print("\n--- Verifying Destination ---")
     
-    # Quick check to make sure the network drive didn't drop before verification
+    # 1. Check if the list is empty to avoid index errors
     if not source_files:
         return False
         
-    # Get the actual Path object from the first item in the list
-    first_file_path = source_files
+    # 2. Extract the Path object from the list.
+    first_file_path = source_files[0][0]
     
+    # 3. Now that first_file_path is a Path object, .parent.exists() will work.
     if not first_file_path.parent.exists():
         print("Warning: Cannot verify because the source drive is no longer accessible.")
         return False
@@ -111,7 +112,7 @@ def verify_directories(source_files, dest_dir):
             missing_files.append(source_path.name)
         else:
             try:
-                # Wrap stat checks in try/except in case the network drops during verification
+                # Wrap stat checks in try/except for network stability
                 if source_path.stat().st_size != dest_path.stat().st_size:
                     incomplete_files.append(source_path.name)
             except OSError:
@@ -128,9 +129,7 @@ def verify_directories(source_files, dest_dir):
                 print(f"  - {f}")
                 
         if incomplete_files:
-            print(f"\nWarning: {len(incomplete_files)} files have mismatched sizes (likely an interrupted copy):")
+            print(f"\nWarning: {len(incomplete_files)} files have mismatched sizes:")
             for f in incomplete_files:
                 print(f"  - {f}")
         return False
-    
-    
