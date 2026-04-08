@@ -87,7 +87,13 @@ def verify_directories(source_files, dest_dir):
     print("\n--- Verifying Destination ---")
     
     # Quick check to make sure the network drive didn't drop before verification
-    if not source_files or not source_files.parent.exists():
+    if not source_files:
+        return False
+        
+    # Get the actual Path object from the first item in the list
+    first_file_path = source_files
+    
+    if not first_file_path.parent.exists():
         print("Warning: Cannot verify because the source drive is no longer accessible.")
         return False
 
@@ -126,3 +132,5 @@ def verify_directories(source_files, dest_dir):
             for f in incomplete_files:
                 print(f"  - {f}")
         return False
+    
+    
