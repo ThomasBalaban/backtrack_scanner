@@ -4,11 +4,9 @@ import json
 from config import LEDGER_FILE
 
 def load_ledger():
-    """Loads the JSON ledger of previously copied files into a Python Set for fast lookups."""
     if LEDGER_FILE.exists():
         try:
             with open(LEDGER_FILE, 'r') as f:
-                # Convert the JSON list into a Set
                 return set(json.load(f))
         except json.JSONDecodeError:
             print("Warning: JSON inventory file corrupted. Building a new one.")
@@ -16,13 +14,10 @@ def load_ledger():
     return set()
 
 def save_ledger(ledger_data):
-    """Saves the Set of copied files back to a formatted JSON file."""
     with open(LEDGER_FILE, 'w') as f:
-        # Convert the Set back to a sorted list so the JSON file is highly readable
         json.dump(sorted(list(ledger_data)), f, indent=4)
 
 def copy_files(source_files, dest_dir):
-    """Copies a list of file paths and updates the JSON inventory."""
     if not dest_dir.exists():
         print(f"Creating destination directory: {dest_dir}")
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -40,24 +35,47 @@ def copy_files(source_files, dest_dir):
         filename = source_path.name
         dest_path = dest_dir / filename
         
-        # Fast Check: Is it in the JSON ledger? 
-        # Fallback Check: Does it actually exist on the disk anyway?
+        # We append a temporary extension for the transfer process
+        temp_dest_path = dest_path.with_suffix('.mkv.part')
+        
+        # Fast Check & Fallback Check
         if filename in ledger or dest_path.exists():
             skipped_count += 1
-            # If it was on the disk but missing from the JSON, add it to our ledger memory
             ledger.add(filename) 
             continue
             
         print(f"Copying: {filename}...")
         try:
-            shutil.copy2(source_path, dest_path)
-            # Only add to the ledger if the copy succeeds without throwing an error
+            # 1. Copy to the temporary .part file
+            shutil.copy2(source_path, temp_dest_path)
+            
+            # 2. If we reach this line, the copy was 100% successful. Rename to .mkv
+            temp_dest_path.rename(dest_path)
+            
+            # 3. Log the success
             ledger.add(filename) 
             copied_count += 1
-        except Exception as e:
-            print(f"Failed to copy {filename}. Error: {e}")
             
-    # Save the updated ledger only if we actually added new files to it
+        except OSError as e:
+            # OSError catches network drops, missing drives, and I/O interruptions
+            print(f"\n[!] NETWORK ERROR: Interrupted while copying {filename}.")
+            print(f"Error Details: {e}")
+            
+            # Auto-Cleanup: Delete the incomplete partial file
+            if temp_dest_path.exists():
+                print(f"Cleaning up incomplete file: {temp_dest_path.name}")
+                temp_dest_path.unlink()
+                
+            print("\nAborting the rest of the queue to prevent errors. Please reconnect and run again.")
+            break # Breaks out of the loop completely
+            
+        except Exception as e:
+            print(f"\n[!] UNEXPECTED ERROR: {e}")
+            if temp_dest_path.exists():
+                temp_dest_path.unlink()
+            break
+            
+    # Save the updated ledger only if we actually added new files
     if len(ledger) > initial_ledger_size:
         print("\nSaving updated JSON inventory file...")
         save_ledger(ledger)
@@ -66,9 +84,13 @@ def copy_files(source_files, dest_dir):
 
 
 def verify_directories(source_files, dest_dir):
-    """Compares the source file list against the destination to check for missing/corrupted files."""
     print("\n--- Verifying Destination ---")
     
+    # Quick check to make sure the network drive didn't drop before verification
+    if not source_files or not source_files.parent.exists():
+        print("Warning: Cannot verify because the source drive is no longer accessible.")
+        return False
+
     missing_files = []
     incomplete_files = []
     
@@ -81,8 +103,14 @@ def verify_directories(source_files, dest_dir):
         
         if not dest_path.exists():
             missing_files.append(source_path.name)
-        elif source_path.stat().st_size != dest_path.stat().st_size:
-            incomplete_files.append(source_path.name)
+        else:
+            try:
+                # Wrap stat checks in try/except in case the network drops during verification
+                if source_path.stat().st_size != dest_path.stat().st_size:
+                    incomplete_files.append(source_path.name)
+            except OSError:
+                print(f"Warning: Lost connection while verifying {source_path.name}")
+                return False
 
     if not missing_files and not incomplete_files:
         print("Success: All source files are present in the destination and sizes match perfectly.")
