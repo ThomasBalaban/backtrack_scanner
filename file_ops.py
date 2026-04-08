@@ -4,7 +4,7 @@ import json
 from config import LEDGER_FILE
 from datetime import datetime
 from pathlib import Path
-from send2trash import send2trash
+from send2trash import send2trash # type: ignore
 
 CLUSTER_WINDOW_SECONDS = 120
 DELETED_LEDGER_FILE = Path("deleted_ledger.json")
