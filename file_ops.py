@@ -22,15 +22,16 @@ def load_ledger():
                     for filename in data:
                         ts_str = filename.replace("Backtrack ", "").replace(".mkv", "")
                         new_ledger[filename] = ts_str
-
                     save_ledger(new_ledger)
                     return new_ledger
 
                 return data
-        except json.JSONDecodeError:
-            print("Warning: JSON inventory file corrupted. Building a new one.")
-            return {}
-    return {}
+
+        except (json.JSONDecodeError, ValueError):
+            print("Warning: JSON inventory file corrupted. Rebuilding ledger from DEST_DIR...")
+            return rebuild_ledger_from_dest()
+    else:
+        return rebuild_ledger_from_dest()
 
 
 def save_ledger(ledger_data):
@@ -41,8 +42,15 @@ def save_ledger(ledger_data):
 
 def load_deleted_ledger():
     if DELETED_LEDGER_FILE.exists():
-        with open(DELETED_LEDGER_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(DELETED_LEDGER_FILE, "r") as f:
+                data = f.read().strip()
+                if not data:
+                    return {}  # empty file -> empty dict
+                return json.loads(data)
+        except json.JSONDecodeError:
+            print("Warning: deleted_ledger.json corrupted, starting fresh.")
+            return {}
     return {}
 
 
@@ -71,12 +79,11 @@ def copy_files(source_files, dest_dir):
         filename = source_path.name
         dest_path = dest_dir / filename
         timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
-        ledger[filename] = timestamp_str
         temp_dest_path = dest_path.with_suffix('.mkv.part')
 
+        # Only skip if it already exists in ledger/deleted_ledger or destination
         if filename in ledger or filename in deleted_ledger or dest_path.exists():
             skipped_count += 1
-            ledger[filename] = timestamp_str
             continue
 
         print(f"Copying: {filename}...")
@@ -84,6 +91,7 @@ def copy_files(source_files, dest_dir):
             shutil.copy2(source_path, temp_dest_path)
             temp_dest_path.rename(dest_path)
 
+            # Now log it after a successful copy
             ledger[filename] = timestamp_str
             copied_count += 1
 
@@ -116,35 +124,27 @@ def cluster_files(ledger):
 
     parsed = []
     for filename, ts in ledger.items():
-        # Split into date and time to safely target only the time portion
+        # Fix old timestamps with dashes in the time part
         date_part, time_part = ts.split(" ")
-        
-        # Replace dashes with colons only in the time part
         time_part = time_part.replace("-", ":")
-        
-        # Recombine into the correct format
         ts_fixed = f"{date_part} {time_part}"
-        
         dt = datetime.strptime(ts_fixed, "%Y-%m-%d %H:%M:%S")
         parsed.append((filename, dt))
 
-    # Sort strictly by the datetime object
-    parsed.sort(key=lambda x: x)
+    parsed.sort(key=lambda x: x[1])  # sort by datetime
 
     clusters = []
-    current_cluster = [parsed]
+    current_cluster = [parsed[0]]  # ✅ only the first tuple, not the whole list
 
     for i in range(1, len(parsed)):
-        # Explicitly unpack the tuple into filename and time
         prev_filename, prev_time = parsed[i - 1]
         curr_filename, curr_time = parsed[i]
 
-        # Now we know for sure prev_time and curr_time are just datetime objects
         if (curr_time - prev_time).total_seconds() <= CLUSTER_WINDOW_SECONDS:
             current_cluster.append(parsed[i])
         else:
             clusters.append(current_cluster)
-            current_cluster = [parsed[i]]
+            current_cluster = [parsed[i]]  # ✅ again, just the tuple
 
     clusters.append(current_cluster)
     return clusters
@@ -157,18 +157,17 @@ def select_files_to_delete(clusters, deleted_ledger):
         if len(cluster) <= 1:
             continue
 
-        # Safely finds the max using the datetime object (x)
-        newest = max(cluster, key=lambda x: x)
+        # Keep the newest (latest datetime)
+        newest = max(cluster, key=lambda x: x[1])
 
         print("\nCluster detected:")
         for f, t in cluster:
             print(f"  {f} -> {t}")
-        print(f"Keeping: {newest}")
+        print(f"Keeping: {newest[0]}")
 
-        for file in cluster:
-            filename = file
-            if file != newest and filename not in deleted_ledger:
-                to_delete.append(filename)
+        for file, _ in cluster:
+            if file != newest[0] and file not in deleted_ledger:
+                to_delete.append(file)
 
     return to_delete
 
@@ -206,6 +205,30 @@ def cleanup_clusters(dest_dir):
 
     deleted_ledger = delete_files(to_delete, dest_dir, deleted_ledger)
     save_deleted_ledger(deleted_ledger)
+
+
+def rebuild_ledger_from_dest():
+    """
+    Scans the destination directory for files and builds
+    a ledger {filename: timestamp_str} based on the filenames.
+    """
+    from config import DEST_DIR
+
+    ledger = {}
+    if DEST_DIR.exists():
+        for file_path in DEST_DIR.glob("Backtrack *.mkv"):
+            # Extract timestamp from filename: "Backtrack 2026-04-03 19-05-03.mkv"
+            ts_str = file_path.stem.replace("Backtrack ", "")
+            ledger[file_path.name] = ts_str
+
+        print(f"Rebuilt ledger from {len(ledger)} files in DEST_DIR.")
+
+        # Save rebuilt ledger so next run is synced
+        save_ledger(ledger)
+    else:
+        print("Destination directory does not exist, cannot rebuild ledger.")
+
+    return ledger
 
 
 def verify_directories(source_files, dest_dir):

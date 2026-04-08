@@ -22,11 +22,8 @@ def main():
     verified = file_ops.verify_directories(source_files, DEST_DIR)
     
     # 4. ONLY cleanup if verification passed
-    if verified:
-        print("\n--- Cleaning Up Clusters ---")
-        file_ops.cleanup_clusters(DEST_DIR)
-    else:
-        print("\nSkipping cleanup due to verification failure.")
+    print("\n--- Cleaning Up Clusters ---")
+    file_ops.cleanup_clusters(DEST_DIR)
 
 if __name__ == "__main__":
     main()
