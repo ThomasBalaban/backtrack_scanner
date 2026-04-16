@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from send2trash import send2trash # type: ignore
 
-CLUSTER_WINDOW_SECONDS = 60
+CLUSTER_WINDOW_SECONDS = 90
 DELETED_LEDGER_FILE = Path("deleted_ledger.json")
 
 
